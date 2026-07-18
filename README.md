@@ -19,10 +19,38 @@ Jerky.restore(archive, dir);                          // refuses a bad CRC outri
 Scope, honestly narrowed: archival compression needs no benchmark (cold bytes are strictly
 better smaller); the deferred **columnar scan format** keeps its measured-first trigger.
 
+## Design notes
+
+- **Never unpack garbage.** `restore` runs a full CRC verification pass before extracting a
+  single byte; a failed archive leaves the target untouched. Archived names are checked
+  against path traversal before any write.
+- **Compressed sizes are framed explicitly.** Inflaters read ahead, so unframed boundaries
+  corrupt the next entry — each file's deflated region is length-prefixed and sliced
+  exactly. (This bit once during development; the framing is the fix, and the corruption
+  test guards it.)
+- **`Cured` tells the truth:** files, raw bytes, cured bytes, ratio — compression claims
+  are numbers, not adjectives.
+- **Scope, honestly narrowed:** archival compression only. The columnar scan format keeps
+  its measured-first trigger — a benchmark showing cold-segment scans as a real cost.
+
 ## The ecosystem
 
-Engines 1–6: [CSRBT](https://github.com/RicheyWorks/CSRBT) (index) · [SuperBeefSort](https://github.com/RicheyWorks/SuperBeefSort) (intake) · [SmokeHouse](https://github.com/RicheyWorks/SmokeHouse) (store) · [Carver](https://github.com/RicheyWorks/Carver) (read planner) · [Renderer](https://github.com/RicheyWorks/Renderer) (materialized views) · [Brine](https://github.com/RicheyWorks/Brine) (adaptive cache).
-Engines 7–11: [PitBoss](https://github.com/RicheyWorks/PitBoss) (fleet conductor) · [DryAge](https://github.com/RicheyWorks/DryAge) (time travel) · [Twine](https://github.com/RicheyWorks/Twine) (atomic batches) · [SmokeSignal](https://github.com/RicheyWorks/SmokeSignal) (the wire) · [Jerky](https://github.com/RicheyWorks/Jerky) (cold archives).
+Eleven engines, one organism — each in its own repo, composed by nested Gradle
+composite builds:
+
+| Engine | Role |
+|---|---|
+| [CSRBT](https://github.com/RicheyWorks/CSRBT) | the adaptive ordered index — orders the world |
+| [SuperBeefSort](https://github.com/RicheyWorks/SuperBeefSort) | the intake tract — profiles, sorts, feeds in O(n) |
+| [SmokeHouse](https://github.com/RicheyWorks/SmokeHouse) | the log-structured store — durability, tail, watchers, replicas |
+| [Carver](https://github.com/RicheyWorks/Carver) | the read planner — decides how to read |
+| [Renderer](https://github.com/RicheyWorks/Renderer) | the materialized-view engine — folds the tail into live aggregates |
+| [Brine](https://github.com/RicheyWorks/Brine) | the adaptive cache — eviction policy evolved per workload |
+| [PitBoss](https://github.com/RicheyWorks/PitBoss) | the fleet conductor — lag watch, re-bootstrap, the promotion runbook |
+| [DryAge](https://github.com/RicheyWorks/DryAge) | the time-travel engine — as-of reads over preserved history |
+| [Twine](https://github.com/RicheyWorks/Twine) | crash-atomic multi-key batches — journaled commit, idempotent replay |
+| [SmokeSignal](https://github.com/RicheyWorks/SmokeSignal) | the wire — a loopback protocol face for the store |
+| **Jerky** (this repo) | cold storage — compressed, CRC-verified backup archives |
 
 ## Build
 
