@@ -30,8 +30,14 @@ better smaller); the deferred **columnar scan format** keeps its measured-first 
   test guards it.)
 - **`Cured` tells the truth:** files, raw bytes, cured bytes, ratio — compression claims
   are numbers, not adjectives.
-- **Scope, honestly narrowed:** archival compression only. The columnar scan format keeps
-  its measured-first trigger — a benchmark showing cold-segment scans as a real cost.
+- **Scope, honestly narrowed:** archival compression only. The columnar scan format kept
+  its measured-first trigger — a benchmark showing cold-segment scans as a real cost — and
+  on 2026-08-20 the benchmark ran and **the trigger fired at 524×**: answering one scan over
+  a cold archive (inflate → recover → range-scan) costs 524× the raw-read floor at 60k
+  records, dominated by the scan through the recovered store itself
+  ([`WholeHog/docs/EXPERIMENT-2026-08-20-cold-triggers.md`](https://github.com/RicheyWorks/WholeHog/blob/main/docs/EXPERIMENT-2026-08-20-cold-triggers.md)).
+  The columnar format is now an unlocked slice — format ADR first, because persisted formats
+  are forever.
 
 ## The ecosystem
 
