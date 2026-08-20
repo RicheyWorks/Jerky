@@ -107,4 +107,31 @@ class JerkyTest {
         Files.write(notAnArchive, new byte[]{1, 2, 3});
         assertFalse(Jerky.verify(notAnArchive));
     }
+
+    @Test
+    void targetedExtractionInflatesOnlyWhatWasAsked(@TempDir Path srcDir, @TempDir Path archiveDir)
+            throws IOException {
+        // Three files; extract must return the middle one byte-true without touching the rest.
+        Files.writeString(srcDir.resolve("aaa.txt"), "first file, some bytes");
+        byte[] wanted = new byte[4096];
+        new Random(7).nextBytes(wanted);
+        Files.write(srcDir.resolve("scan.run"), wanted);
+        Files.writeString(srcDir.resolve("zzz.txt"), "last file");
+        Path archive = archiveDir.resolve("toc.jerky");
+        Jerky.cure(srcDir, archive);
+
+        assertEquals(java.util.List.of("aaa.txt", "scan.run", "zzz.txt"), Jerky.names(archive),
+                "the table of contents, in archive order");
+        assertTrue(java.util.Arrays.equals(wanted, Jerky.extract(archive, "scan.run")),
+                "the extracted entry is byte-true");
+        assertThrows(IOException.class, () -> Jerky.extract(archive, "missing.bin"),
+                "an absent name fails loudly, naming what IS archived");
+
+        // Corruption anywhere refuses extraction of anything — whole-body CRC, whole-body trust.
+        byte[] bytes = Files.readAllBytes(archive);
+        bytes[10] ^= 0x01;
+        Path tampered = archiveDir.resolve("tampered.jerky");
+        Files.write(tampered, bytes);
+        assertThrows(IOException.class, () -> Jerky.extract(tampered, "scan.run"));
+    }
 }

@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
@@ -115,6 +116,89 @@ public final class Jerky {
             throw new IOException("archive fails verification: " + archive);
         }
         readInto(archive, targetDir);
+    }
+
+    /**
+     * The archived file names, in archive order — the table of contents, without extracting
+     * anything (ADR scan-sidecar, 2026-08-20). CRC-verified like every read.
+     */
+    public static List<String> names(Path archive) throws IOException {
+        List<String> out = new ArrayList<>();
+        walk(archive, (name, inflate) -> out.add(name));
+        return out;
+    }
+
+    /**
+     * Extract ONE archived file's bytes (ADR scan-sidecar, 2026-08-20): the whole body is
+     * CRC-verified (it is already in memory — v1's whole-body checksum makes that free), but
+     * only the requested entry is inflated; the others are skipped by their framed compressed
+     * length. This is the cold-scan door: {@code extract(archive, "scan.run")} feeds
+     * {@code SmokeHouse.scanSorted} and history is scanned without resurrecting a store.
+     * The v1 framing supported this from birth; it just had no caller until the 2026-08-20
+     * benchmark (524× the raw-read floor) gave it one.
+     *
+     * @throws IOException if the archive is corrupt or holds no file named {@code name}
+     */
+    public static byte[] extract(Path archive, String name) throws IOException {
+        Objects.requireNonNull(name, "name");
+        byte[][] found = new byte[1][];
+        try {
+            walk(archive, (entryName, inflate) -> {
+                if (entryName.equals(name)) {
+                    found[0] = inflate.get();
+                }
+            });
+        } catch (java.io.UncheckedIOException e) {
+            throw e.getCause();
+        }
+        if (found[0] == null) {
+            throw new IOException("no '" + name + "' in " + archive + "; archived: " + names(archive));
+        }
+        return found[0];
+    }
+
+    /** An entry visitor: inflate lazily via the supplier, or don't and the entry is skipped. */
+    private interface EntryVisitor {
+        void entry(String name, java.util.function.Supplier<byte[]> inflate) throws IOException;
+    }
+
+    /** CRC-verify the whole archive, then walk entries, inflating only where the visitor asks. */
+    private static void walk(Path archive, EntryVisitor visitor) throws IOException {
+        byte[] bytes = Files.readAllBytes(archive);
+        if (bytes.length < Long.BYTES + Integer.BYTES * 2) {
+            throw new IOException("archive truncated: " + bytes.length + " bytes");
+        }
+        int body = bytes.length - Long.BYTES;
+        CRC32 crc = new CRC32();
+        crc.update(bytes, 0, body);
+        DataInputStream trailer = new DataInputStream(
+                new java.io.ByteArrayInputStream(bytes, body, Long.BYTES));
+        if (crc.getValue() != trailer.readLong()) {
+            throw new IOException("CRC mismatch: " + archive);
+        }
+        DataInputStream in = new DataInputStream(
+                new java.io.ByteArrayInputStream(bytes, 0, body));
+        if (in.readInt() != MAGIC) {
+            throw new IOException("not a .jerky archive: " + archive);
+        }
+        int count = in.readInt();
+        for (int i = 0; i < count; i++) {
+            String name = in.readUTF();
+            long size = in.readLong();
+            int compressedSize = in.readInt();
+            byte[] region = new byte[compressedSize];
+            in.readFully(region);                              // the exact compressed slice
+            visitor.entry(name, () -> {
+                try {
+                    InputStream inflate = new InflaterInputStream(
+                            new java.io.ByteArrayInputStream(region),
+                            new java.util.zip.Inflater(true));
+                    return readExactly(inflate, size, name);
+                } catch (IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            });
+        }
     }
 
     /** Shared walk: with a target, extract; with null, just parse + sum. */

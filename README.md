@@ -36,8 +36,13 @@ better smaller); the deferred **columnar scan format** keeps its measured-first 
   a cold archive (inflate → recover → range-scan) costs 524× the raw-read floor at 60k
   records, dominated by the scan through the recovered store itself
   ([`WholeHog/docs/EXPERIMENT-2026-08-20-cold-triggers.md`](https://github.com/RicheyWorks/WholeHog/blob/main/docs/EXPERIMENT-2026-08-20-cold-triggers.md)).
-  The columnar format is now an unlocked slice — format ADR first, because persisted formats
-  are forever.
+  The trigger was answered the same day by
+  [`docs/ADR-scan-sidecar-2026-08-20.md`](docs/ADR-scan-sidecar-2026-08-20.md): **no v2
+  format** — the archive was never the enemy, the resurrection was. SmokeHouse exports a
+  sorted run, scan-carrying generations hold it from birth, and `Jerky.extract(archive,
+  "scan.run")` inflates just that entry (plus `Jerky.names` for the table of contents — the
+  v1 framing supported targeted extraction from birth; it just had no caller). Cold scans
+  now run **22–33× faster** than the resurrection route.
 
 ## The ecosystem
 
