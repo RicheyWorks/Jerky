@@ -142,8 +142,10 @@ public final class Jerky {
     public static byte[] extract(Path archive, String name) throws IOException {
         Objects.requireNonNull(name, "name");
         byte[][] found = new byte[1][];
-        try {
-            walk(archive, (entryName, inflate) -> {
+        List<String> seen = new ArrayList<>();                 // ninth-pass finding 3: one walk,
+        try {                                                  // not a second full read just to
+            walk(archive, (entryName, inflate) -> {            // name what IS archived
+                seen.add(entryName);
                 if (entryName.equals(name)) {
                     found[0] = inflate.get();
                 }
@@ -152,7 +154,7 @@ public final class Jerky {
             throw e.getCause();
         }
         if (found[0] == null) {
-            throw new IOException("no '" + name + "' in " + archive + "; archived: " + names(archive));
+            throw new IOException("no '" + name + "' in " + archive + "; archived: " + seen);
         }
         return found[0];
     }
