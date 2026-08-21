@@ -134,4 +134,47 @@ class JerkyTest {
         Files.write(tampered, bytes);
         assertThrows(IOException.class, () -> Jerky.extract(tampered, "scan.run"));
     }
+
+    @Test
+    void archivesAcrossTheDeflaterBufferBoundaryRoundTripByteExact(@TempDir Path srcDir,
+                                                                   @TempDir Path archiveDir,
+                                                                   @TempDir Path restoreDir)
+            throws IOException {
+        // Tenth-pass J1: the flush/close-ordering lead. cure() writes the body through an
+        // UNBUFFERED DataOutputStream over a pass-through CheckedOut and flushes before appending
+        // the trailer, so there is no buffered layer that could leave body bytes behind the
+        // trailer — the hypothesized bug does not exist. But the hunt flagged "archives near a
+        // buffer boundary" as the untested corner; this closes it. Payloads straddle the
+        // deflater's 1<<16 buffer with incompressible data (deflated ≈ raw, crossing the boundary
+        // repeatedly) plus a highly-compressible one; every file must round-trip byte-exact.
+        int buf = 1 << 16;
+        java.util.Map<String, byte[]> expected = new TreeMap<>();
+        Random rnd = new Random(20260821L);
+        int[] sizes = {0, 1, buf - 1, buf, buf + 1, 2 * buf, 3 * buf + 7};
+        for (int i = 0; i < sizes.length; i++) {
+            byte[] payload = new byte[sizes[i]];
+            rnd.nextBytes(payload);                             // incompressible: crosses the buffer
+            String name = String.format("rand-%02d-%d.bin", i, sizes[i]);
+            expected.put(name, payload);
+            Files.write(srcDir.resolve(name), payload);
+        }
+        byte[] runs = new byte[5 * buf];
+        java.util.Arrays.fill(runs, (byte) 'Q');               // highly compressible: deflated ≪ raw
+        expected.put("runs.bin", runs);
+        Files.write(srcDir.resolve("runs.bin"), runs);
+
+        Path archive = archiveDir.resolve("boundary.jerky");
+        Jerky.cure(srcDir, archive);
+        assertTrue(Jerky.verify(archive), "the whole-body CRC must verify across the boundary");
+
+        Path unpacked = restoreDir.resolve("unpacked");
+        Jerky.restore(archive, unpacked);
+        for (var e : expected.entrySet()) {
+            byte[] restored = Files.readAllBytes(unpacked.resolve(e.getKey()));
+            assertTrue(java.util.Arrays.equals(e.getValue(), restored),
+                    "restored " + e.getKey() + " must be byte-exact across the buffer boundary");
+            assertTrue(java.util.Arrays.equals(e.getValue(), Jerky.extract(archive, e.getKey())),
+                    "targeted extract of " + e.getKey() + " must be byte-exact too");
+        }
+    }
 }
